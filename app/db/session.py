@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from alembic.config import Config
@@ -21,7 +22,7 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncIterator[AsyncSession]:
     async with AsyncSessionLocal() as session:
         try:
             yield session

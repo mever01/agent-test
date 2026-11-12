@@ -1,7 +1,7 @@
 import uuid
 import pytest
 from pydantic import ValidationError
-from app.agent.tools.schemas import TOOLS_DEFINITIONS, SearchEmailsArgs, ReadThreadArgs, CreateDraftArgs
+from app.agent.tools import TOOLS_DEFINITIONS, SearchEmailsArgs, ReadThreadArgs, CreateDraftArgs
 
 def test_tools_definitions_match_tz():
     tool_names = [t["function"]["name"] for t in TOOLS_DEFINITIONS]
@@ -57,3 +57,12 @@ def test_tools_pydantic_args_validation():
         })
 
 
+
+def test_search_accepts_filters_without_words_and_rejects_empty_criteria():
+    assert SearchEmailsArgs(sender=" director@progress-corp.ru ").sender == "director@progress-corp.ru"
+    assert SearchEmailsArgs(participant="director@progress-corp.ru").words is None
+    assert SearchEmailsArgs(start_date="2026-10-01").start_date.isoformat() == "2026-10-01"
+    with pytest.raises(ValidationError):
+        SearchEmailsArgs(words="   ")
+    with pytest.raises(ValidationError):
+        SearchEmailsArgs(start_date="2026-10-31", end_date="2026-10-01")

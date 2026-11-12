@@ -1,5 +1,9 @@
-from app.db.repositories.email_repository import EmailRepository
-from app.db.repositories.vector_repository import VectorRepository
+from app.db.repositories.mail_repository import MailRepository
+from app.db.repositories.rag_document_repository import RAGDocumentRepository
+from app.db.repositories.rag_thread_repository import RAGThreadRepository
 
-__all__ = ["EmailRepository", "VectorRepository"]
-
+__all__ = [
+    "MailRepository",
+    "RAGDocumentRepository",
+    "RAGThreadRepository",
+]

@@ -1,1 +1,1 @@
-# app/agent package
+"""Почтовый AI-агент."""

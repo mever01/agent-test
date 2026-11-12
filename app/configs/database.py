@@ -11,5 +11,8 @@ class DatabaseConfig(BaseSettings):
 
     @property
     def async_url(self) -> str:
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        return (
+            f"postgresql+asyncpg://{self.user}:{self.password}@"
+            f"{self.host}:{self.port}/{self.name}"
+        )
 

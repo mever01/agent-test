@@ -44,6 +44,7 @@ services:
       - .env
     environment:
       - DB_HOST=postgres
+      - SECURITY_EVENTS_PATH=/app/audit/security_events.jsonl
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - EMBEDDING_URL=http://host.docker.internal:11434/api/embeddings
       - LLM_URL=http://host.docker.internal:11435/v1/chat/completions
@@ -56,12 +57,13 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app
+      - ./core:/app/core
       - ./data:/app/data
       - ./scripts:/app/scripts
       - ./tests:/app/tests
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
-      - ./security_events.jsonl:/app/security_events.jsonl
+      - ./audit:/app/audit
 
   rag_worker:
     build:
@@ -74,6 +76,7 @@ services:
       - .env
     environment:
       - DB_HOST=postgres
+      - SECURITY_EVENTS_PATH=/app/audit/security_events.jsonl
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - EMBEDDING_URL=http://host.docker.internal:11434/api/embeddings
       - LLM_URL=http://host.docker.internal:11435/v1/chat/completions
@@ -86,12 +89,13 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app
+      - ./core:/app/core
       - ./data:/app/data
       - ./scripts:/app/scripts
       - ./tests:/app/tests
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
-      - ./security_events.jsonl:/app/security_events.jsonl
+      - ./audit:/app/audit
 
 volumes:
   pgdata:

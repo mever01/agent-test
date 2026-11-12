@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from app.configs import settings
-from app.schemas.security import SecurityEventLog
+from app.guardrails.schemas import SecurityEventLog
 
 def log_canary_leak(
     run_id: str,

@@ -10,20 +10,5 @@ services:
       - OLLAMA_KEEP_ALIVE=24h
     restart: unless-stopped
 
-  embedder-init:
-    image: curlimages/curl:latest
-    container_name: email_agent_embedder_init
-    depends_on:
-      - embedder
-    restart: "no"
-    command: >
-      sh -c "
-        echo 'Ожидание запуска сервиса embedder...';
-        while ! curl -s http://embedder:11434/api/tags > /dev/null; do sleep 2; done;
-        echo 'Скачивание модели Qwen3-Embedding-0.6B...';
-        curl -X POST http://embedder:11434/api/pull -d '{\"name\": \"qwen3-embedding:0.6b\"}';
-        echo 'Эмбеддер готов к работе!';
-      "
-
 volumes:
   embedder_storage:

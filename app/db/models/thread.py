@@ -61,7 +61,3 @@ class Thread(Base):
         cascade="all, delete-orphan",
     )
 
-
-
-
-

@@ -1,10 +1,10 @@
 import httpx
-import logging
+
+from core.utils.mixins.logger import LoggerMixin
 from app.configs import settings
 
-logger = logging.getLogger(__name__)
 
-class EmbeddingClient:
+class EmbeddingClient(LoggerMixin):
     def __init__(
         self,
         url: str | None = None,
@@ -12,53 +12,114 @@ class EmbeddingClient:
         dimension: int | None = None,
         api_key: str | None = None,
         timeout: float = 30.0,
-    ):
-        self.url = url or settings.embedding.url
-        self.model_name = model_name or settings.embedding.model_name
-        self.dimension = dimension or settings.embedding.dimension
-        self.api_key = api_key or settings.embedding.api_key
-        self.timeout = timeout
+    ) -> None:
+        self.url = (
+            settings.embedding.url if url is None else url
+        )
+        self.model_name = (
+            settings.embedding.model_name
+            if model_name is None else model_name
+        )
+        self.dimension = (
+            settings.embedding.dimension
+            if dimension is None else dimension
+        )
+        self.api_key = (
+            settings.embedding.api_key
+            if api_key is None else api_key
+        )
 
-    async def get_embedding(self, text: str, instruction: str | None = None) -> list[float]:
-        """
-        Получение эмбеддинга для одного текста.
-        Поддерживает Qwen3-Embedding instruction-aware формат.
-        """
-        headers = {"Content-Type": "application/json"}
-        if self.api_key and self.api_key.strip():
+        headers = {
+            "Content-Type": "application/json",
+        }
+
+        if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        prompt = f"Instruct: {instruction}\nQuery: {text}" if instruction else text
+        self._client = httpx.AsyncClient(
+            timeout=timeout,
+            headers=headers,
+        )
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                # 1. Попытка вызвать Ollama native /api/embeddings формат
-                if "/api/embeddings" in self.url:
-                    payload = {"model": self.model_name, "prompt": prompt}
-                else:
-                    # 2. Стандартный OpenAI формат (/v1/embeddings)
-                    payload = {"model": self.model_name, "input": prompt}
+    async def get_embedding(
+        self,
+        text: str,
+        instruction: str | None = None,
+    ) -> list[float]:
+        """Получает embedding одного текста."""
 
-                response = await client.post(self.url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
+        prompt = (
+            f"Instruct: {instruction}\nQuery: {text}"
+            if instruction
+            else text
+        )
 
-                if "data" in data and len(data["data"]) > 0:
-                    return data["data"][0]["embedding"]
-                elif "embedding" in data:
-                    return data["embedding"]
-                else:
-                    raise ValueError(f"Неожиданный формат ответа эмбеддера: {data}")
-            except Exception as e:
-                logger.error(f"Ошибка вызова сервиса эмбеддингов по адресу {self.url}: {e}")
-                # Если сервис недоступен в изоляции, выбрасываем ошибку
-                raise e
+        if "/api/embeddings" in self.url:
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+            }
+        else:
+            payload = {
+                "model": self.model_name,
+                "input": prompt,
+            }
 
-    async def get_embeddings(self, texts: list[str], instruction: str | None = None) -> list[list[float]]:
-        """Пакетное получение эмбеддингов."""
+        try:
+            response = await self._client.post(
+                self.url,
+                json=payload,
+            )
+            response.raise_for_status()
+
+            data = response.json()
+
+            if data.get("data"):
+                embedding = data["data"][0]["embedding"]
+            elif "embedding" in data:
+                embedding = data["embedding"]
+            else:
+                raise ValueError(
+                    "Unexpected embedding response format"
+                )
+
+            if (
+                self.dimension is not None
+                and len(embedding) != self.dimension
+            ):
+                raise ValueError(
+                    f"Invalid embedding dimension: "
+                    f"expected={self.dimension}, "
+                    f"actual={len(embedding)}"
+                )
+
+            return embedding
+
+        except Exception:
+            self.logger.exception(
+                "Embedding request failed: url=%s, model=%s",
+                self.url,
+                self.model_name,
+            )
+            raise
+
+    async def get_embeddings(
+        self,
+        texts: list[str],
+        instruction: str | None = None,
+    ) -> list[list[float]]:
+        """Получает embeddings для нескольких текстов."""
+
         results = []
-        for t in texts:
-            emb = await self.get_embedding(t, instruction=instruction)
-            results.append(emb)
+
+        for text in texts:
+            embedding = await self.get_embedding(
+                text,
+                instruction=instruction,
+            )
+            results.append(embedding)
+
         return results
 
+    async def close(self) -> None:
+        await self._client.aclose()

@@ -14,6 +14,7 @@ class Draft(Base):
         default=uuid.uuid4,
         server_default=func.gen_random_uuid(),
     )
+    operation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, unique=True)
     thread_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         ForeignKey("threads.id", ondelete="CASCADE"),

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, func, Uuid
+from sqlalchemy import String, Text, DateTime, func, Uuid
 from sqlalchemy.dialects.postgresql import ENUM as pgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.models.base import Base
@@ -17,6 +17,7 @@ class User(Base):
         server_default=func.gen_random_uuid(),
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str | None] = mapped_column(Text)
     role: Mapped[UserRole] = mapped_column(
         pgEnum(
             UserRole,

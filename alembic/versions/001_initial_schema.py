@@ -36,12 +36,12 @@ def upgrade() -> None:
     op.create_table(
         'users',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-        sa.Column('email', sa.String(length=255), nullable=False),
+        sa.Column('row_email', sa.String(length=255), nullable=False),
         sa.Column('role', user_role_enum, nullable=False, server_default='manager'),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('ix_users_email', 'users', ['email'], unique=True)
+    op.create_index('ix_users_email', 'users', ['row_email'], unique=True)
 
     # 4. Таблица цепочек (Threads)
     op.create_table(

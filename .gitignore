@@ -38,6 +38,7 @@ htmlcov/
 
 # Project specific logs & security audit outputs
 security_events.jsonl
+/audit/
 *.log
 logs/
 

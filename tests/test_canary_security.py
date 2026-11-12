@@ -1,8 +1,6 @@
 import json
-import os
 from pathlib import Path
-from app.guardrails.outbound.canary_detector import is_canary_leaked
-from app.guardrails.tools_guard import check_tool_calls_for_canary
+from app.guardrails.outbound.canary_detector import find_canary_in_response, is_canary_leaked
 from app.guardrails.security_logger import log_canary_leak
 
 def test_canary_detected_in_model_response():
@@ -22,8 +20,9 @@ def test_canary_detected_in_tool_call_arguments():
         {"name": "create_draft", "args": {"thread_id": "th_1", "text": f"секрет {canary}"}}
     ]
 
-    assert check_tool_calls_for_canary(safe_tool_calls, canary) is False
-    assert check_tool_calls_for_canary(leaked_tool_calls, canary) is True
+    assert find_canary_in_response({"tool_calls": safe_tool_calls}, canary) is None
+    location = find_canary_in_response({"tool_calls": leaked_tool_calls}, canary)
+    assert location == "tool_call_arguments"
 
 def test_security_event_logger_contract(tmp_path: Path):
     log_file = tmp_path / "test_security_events.jsonl"
@@ -54,4 +53,3 @@ def test_security_event_logger_contract(tmp_path: Path):
 
     # КРИТИЧЕСКАЯ ПРОВЕРКА ТЗ: в логе НЕ должно быть самого токена!
     assert canary_token not in content
-

@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, SecretStr
 
 from app.configs.app import AppConfig
 from app.configs.database import DatabaseConfig
@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig)
+    auth_session_ttl: int = Field(3600, gt=0)
+    seed_user_email: str = Field("manager@example.org", min_length=1, max_length=255)
+    seed_user_password: SecretStr = Field(
+        default=SecretStr("AgentDemo-2026!"),
+        min_length=12,
+        max_length=256,
+    )
     agent: AgentConfig = Field(default_factory=AgentConfig)
 
     model_config = SettingsConfigDict(

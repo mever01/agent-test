@@ -1,6 +1,6 @@
 from datetime import datetime
-from app.rag.text_cleaner import clean_email_body, format_cleaned_thread
-from app.schemas.email import EmailMessage
+from app.rag.ingestion.text_cleaner import clean_email_body, format_cleaned_thread
+from app.db.schemas import MailMessage
 
 def test_clean_email_body_strips_quotes_and_signatures():
     raw_body = """Здравствуйте! Согласуем дату 25 ноября.
@@ -22,7 +22,7 @@ def test_clean_email_body_strips_quotes_and_signatures():
 
 def test_format_cleaned_thread():
     messages = [
-        EmailMessage(
+        MailMessage(
             id="msg_1",
             thread_id="th_1",
             sender="client@corp.ru",
@@ -31,7 +31,7 @@ def test_format_cleaned_thread():
             subject="Вопрос по поставке",
             body="Интересуют сроки отгрузки партии.",
         ),
-        EmailMessage(
+        MailMessage(
             id="msg_2",
             thread_id="th_1",
             sender="manager@mycorp.ru",
