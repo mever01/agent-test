@@ -1,0 +1,29 @@
+services:
+  llm:
+    image: ollama/ollama:latest
+    container_name: email_agent_llm
+    ports:
+      - "11435:11434"
+    volumes:
+      - llm_storage:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+
+  llm-init:
+    image: curlimages/curl:latest
+    container_name: email_agent_llm_init
+    depends_on:
+      - llm
+    restart: "no"
+    command: >
+      sh -c "
+        echo 'Ожидание запуска сервиса LLM...';
+        while ! curl -s http://llm:11434/api/tags > /dev/null; do sleep 2; done;
+        echo 'Скачивание модели Qwen2.5:7b...';
+        curl -X POST http://llm:11434/api/pull -d '{\"name\": \"qwen2.5:7b\"}';
+        echo 'Основная LLM готова к работе!';
+      "
+
+volumes:
+  llm_storage:

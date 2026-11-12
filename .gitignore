@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.settings/
+
+# Testing & Cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment variables & secrets
+.env
+.env.local
+*.local.env
+
+# Project specific logs & security audit outputs
+security_events.jsonl
+*.log
+logs/
+
+# Temporary and office lock files
+~$*
+*.tmp
+
+# Operating System files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
