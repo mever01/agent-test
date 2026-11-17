@@ -1,17 +1,26 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import String, Text, DateTime, func, Uuid
+from sqlalchemy import UniqueConstraint
 from sqlalchemy.dialects.postgresql import ENUM as pgEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.models.base import Base
-from app.db.enums import ThreadStatus
+from app.db.enums import AccountSource
 from app.db.models.raw_email import RawEmail
 from app.db.models.draft import Draft
-from app.db.models.email_thread_vector import EmailThreadVector
 
 
 class Thread(Base):
     __tablename__ = "threads"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_source", "account_id", "external_thread_id",
+            name="uq_threads_external_thread",
+        ),
+        UniqueConstraint(
+            "id", "account_source", "account_id", name="uq_threads_id_account",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
@@ -19,18 +28,17 @@ class Thread(Base):
         default=uuid.uuid4,
         server_default=func.gen_random_uuid(),
     )
+    account_source: Mapped[AccountSource] = mapped_column(
+        pgEnum(
+            AccountSource,
+            name="account_source",
+            values_callable=lambda values: [item.value for item in values],
+        )
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    external_thread_id: Mapped[str] = mapped_column(Text)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     client_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    status: Mapped[ThreadStatus] = mapped_column(
-        pgEnum(
-            ThreadStatus,
-            name="thread_status",
-            values_callable=lambda x: [e.value for e in x]
-        ),
-        default=ThreadStatus.ACTIVE,
-        server_default=ThreadStatus.ACTIVE.value,
-        nullable=False,
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -54,10 +62,3 @@ class Thread(Base):
         back_populates="thread",
         cascade="all, delete-orphan",
     )
-    vector_summary: Mapped[EmailThreadVector] = relationship(
-        EmailThreadVector,
-        back_populates="thread",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-

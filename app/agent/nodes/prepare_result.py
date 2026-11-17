@@ -8,7 +8,7 @@ from app.agent.prompts import DRAFT, RETRY, SUMMARY
 from app.agent.schemas import AgentResult, Clarification, SourcedAnswer
 from app.agent.state import AgentContext, AgentState, AgentUpdate
 from app.agent.tools import CREATE_DRAFT, CreateDraftArgs, tool_arguments
-from app.db.schemas import MailThreadDetails
+from app.dto.db_mail import MailThreadDetails
 from app.external_api_clients.schemas import ChatMessage
 from app.guardrails.inbound.pii_masker import mask_pii
 
@@ -91,7 +91,7 @@ async def prepare_result(
             "next_step": "__end__",
         }
 
-    allowed_emails = {mail.id for mail in thread.messages[-20:]}
+    allowed_emails = {mail.id for mail in thread.messages}
     allowed_documents = {
         chunk.source_id
         for chunk in state["rag_chunks"]
@@ -116,6 +116,15 @@ async def prepare_result(
 
 
 def _recipient(thread: MailThreadDetails, clarification: str | None) -> str | None:
+    if thread.mailbox_email:
+        mailbox = thread.mailbox_email.strip().casefold()
+        incoming = [
+            mail for mail in thread.messages
+            if mail.sender.strip().casefold() != mailbox and "@" in mail.sender
+        ]
+        if incoming:
+            return incoming[-1].sender.strip().casefold()
+        return None
     client = (thread.client_email or "").strip().casefold()
     confirmed = {mail.sender.strip().casefold() for mail in thread.messages}
     if client and client in confirmed:
@@ -141,12 +150,11 @@ def _model_context(
     recipient: str | None
 ) -> str:
     emails = [
-        {**asdict(mail), "body": mask_pii(mail.body[:4000])}
-        for mail in thread.messages[-20:]
+        {**asdict(mail), "body": mask_pii(mail.body)}
+        for mail in thread.messages
     ]
     sources = [
         {"kind": chunk.source_type, "source_id": chunk.source_id,
-         "thread_id": chunk.thread_id, "date": chunk.date,
          "content": mask_pii(chunk.content[:2500])}
         for chunk in state["rag_chunks"]
     ]
@@ -155,6 +163,13 @@ def _model_context(
         "clarification": state.get("clarification_answer"),
         "thread_id": thread.thread_id,
         "recipient": recipient,
+        "reply_to_email_id": next(
+            (
+                mail.id for mail in reversed(thread.messages)
+                if recipient and mail.sender.strip().casefold() == recipient
+            ),
+            None,
+        ),
         "untrusted_emails": emails,
         "rag_sources": sources,
     }, ensure_ascii=False, default=str)

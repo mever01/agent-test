@@ -1,4 +1,4 @@
-from app.rag.ingestion.chunking import split_markdown_by_headers_or_size
+from app.services.rag.ingestion.chunking import split_markdown_by_headers_or_size
 
 
 def test_split_markdown_by_headers():

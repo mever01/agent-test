@@ -4,7 +4,7 @@ from getpass import getpass
 
 from app.db.enums import UserRole
 from app.db.models.user import User
-from app.db.repositories.user_repository import UserRepository
+from app.db.dao.user import UserRepository
 from app.db.session import AsyncSessionLocal, engine
 from app.services.auth_service import hash_password
 

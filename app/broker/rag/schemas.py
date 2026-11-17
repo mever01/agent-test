@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 
 class QueueEventType(StrEnum):
-    THREAD_CLOSED = "THREAD_CLOSED"
     DOC_INGEST = "DOC_INGEST"
 
 
@@ -20,13 +19,6 @@ class BaseQueueEvent(BaseModel):
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(UTC)
     )
-
-
-class ThreadClosedEvent(BaseQueueEvent):
-    event_type: Literal[QueueEventType.THREAD_CLOSED] = (
-        QueueEventType.THREAD_CLOSED
-    )
-    thread_id: UUID
 
 
 class DocIngestEvent(BaseQueueEvent):

@@ -3,30 +3,33 @@ from collections.abc import Awaitable, Callable
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
-from app.db.models.user import User
-from app.services.auth_service import AuthService
-
-from app.broker.rag.producer import RAGProducer
-from app.db.repositories.mail_repository import MailRepository
-from app.db.repositories.rag_document_repository import RAGDocumentRepository
-from app.db.repositories.rag_thread_repository import RAGThreadRepository
-from app.db.session import AsyncSessionLocal
-from app.services.admin_service import AdminService
-from core.broker.client import RabbitMQClient
 from app.agent.service import AgentService
-from app.services.mail_service import MailService
+from app.broker.rag.producer import RAGProducer
+from app.db.models.user import User
+from app.services.admin_service import AdminService
+from app.services.auth_service import AuthService
+from app.services.db_mail.draft import DraftService
+from app.services.db_mail.raw_email import RawEmailService
+from app.services.db_mail.thread import ThreadService
+from app.services.rag.retrieval.email.service import EmailRetrievalService
+
+from core.broker.client import RabbitMQClient
 
 
-def get_mail_repo() -> MailRepository:
-    return MailRepository(AsyncSessionLocal)
+def get_email_retrieval_service(request: Request) -> EmailRetrievalService:
+    return request.app.state.email_retrieval_service
 
 
-def get_rag_document_repo() -> RAGDocumentRepository:
-    return RAGDocumentRepository(AsyncSessionLocal)
+def get_raw_email_service(request: Request) -> RawEmailService:
+    return request.app.state.raw_email_service
 
 
-def get_rag_thread_repo() -> RAGThreadRepository:
-    return RAGThreadRepository(AsyncSessionLocal)
+def get_thread_service(request: Request) -> ThreadService:
+    return request.app.state.thread_service
+
+
+def get_draft_service(request: Request) -> DraftService:
+    return request.app.state.draft_service
 
 
 def get_rabbitmq_client(request: Request) -> RabbitMQClient:
@@ -35,13 +38,6 @@ def get_rabbitmq_client(request: Request) -> RabbitMQClient:
 
 def get_rag_producer(request: Request) -> RAGProducer:
     return request.app.state.rag_producer
-
-
-def get_mail_service(
-    mail_repo: MailRepository = Depends(get_mail_repo),
-    rag_producer: RAGProducer = Depends(get_rag_producer),
-) -> MailService:
-    return MailService(mail_repo=mail_repo, rag_producer=rag_producer)
 
 
 def get_agent_service(request: Request) -> AgentService:

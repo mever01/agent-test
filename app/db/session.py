@@ -12,6 +12,7 @@ engine = create_async_engine(
     pool_size=settings.db.pool_size,
     max_overflow=5,
     echo=settings.app.debug,
+    hide_parameters=True,
 )
 
 AsyncSessionLocal = async_sessionmaker(

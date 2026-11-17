@@ -7,7 +7,8 @@ from time import monotonic
 from uuid import UUID
 
 from app.db.models.user import User
-from app.db.repositories.user_repository import UserRepository
+from app.db.dao.user import UserRepository
+from app.dto.auth import Session
 
 
 def _derive_password(password: str, salt: bytes) -> str:
@@ -33,13 +34,6 @@ def verify_password(password: str, stored_hash: str | None) -> bool:
 
 def _session_key(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-@dataclass(frozen=True, slots=True)
-class Session:
-    user_id: UUID
-    expires_at: float
-
 
 class AuthService:
     def __init__(self, users: UserRepository, ttl_seconds: int) -> None:

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.schemas import MailSnippet
+from app.dto.db_mail import MailSnippet
 
 
 @dataclass(frozen=True, slots=True)

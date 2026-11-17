@@ -11,7 +11,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d email_agent_db"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -55,6 +55,15 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2).close()"
+      interval: 5s
+      timeout: 3s
+      retries: 20
     volumes:
       - ./app:/app/app
       - ./core:/app/core
@@ -65,13 +74,28 @@ services:
       - ./alembic.ini:/app/alembic.ini
       - ./audit:/app/audit
 
-  rag_worker:
+  gmail_worker:
+    profiles: ["gmail"]
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: email_agent_worker
     restart: unless-stopped
-    command: python -m app.workers.rag_worker
+    command: python -m app.workers.gmail_sync
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=postgres
+    depends_on:
+      api:
+        condition: service_healthy
+
+  document_indexing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: email_agent_document_indexing
+    restart: unless-stopped
+    command: python -m app.workers.document_indexing
     env_file:
       - .env
     environment:
@@ -79,13 +103,10 @@ services:
       - SECURITY_EVENTS_PATH=/app/audit/security_events.jsonl
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - EMBEDDING_URL=http://host.docker.internal:11434/api/embeddings
-      - LLM_URL=http://host.docker.internal:11435/v1/chat/completions
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
+      api:
         condition: service_healthy
     volumes:
       - ./app:/app/app
@@ -96,6 +117,28 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./audit:/app/audit
+
+  email_indexing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: email_agent_email_indexing
+    restart: unless-stopped
+    command: python -m app.workers.email_indexing
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=postgres
+      - EMBEDDING_URL=http://host.docker.internal:11434/api/embeddings
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./core:/app/core
+      - ./tests:/app/tests
 
 volumes:
   pgdata:

@@ -1,4 +1,5 @@
 import logging
+import httpx
 from uuid import UUID
 
 from langgraph.runtime import Runtime
@@ -9,7 +10,7 @@ from app.agent.prompts import RETRY, SEARCH
 from app.agent.schemas import AgentResult, Clarification, SearchNeedsCriteria
 from app.agent.state import AgentContext, AgentState, AgentUpdate
 from app.agent.tools import SEARCH_EMAILS, SearchEmailsArgs, tool_arguments
-from app.db.schemas import MailSnippet
+from app.dto.db_mail import MailSearchCriteria, MailSnippet
 
 SEARCH_LIMIT = 10
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ async def search(
 
     try:
         matches = await _search_mail(runtime.context, criteria)
-    except (SQLAlchemyError, OSError):
+    except (SQLAlchemyError, OSError, httpx.HTTPError, ValueError):
         return {"result": AgentResult(
             run_id, "Не удалось выполнить поиск писем.", status="failed"
         ), "next_step": "__end__"}
@@ -72,23 +73,36 @@ async def search(
     return _select_thread(matches, criteria.thread_selection == "latest")
 
 
-async def _search_mail(context: AgentContext, criteria: SearchEmailsArgs) -> list[MailSnippet]:
-    return await context.mail.search_emails(
+async def _search_mail(
+    context: AgentContext, criteria: SearchEmailsArgs,
+) -> list[MailSnippet]:
+    filters = MailSearchCriteria(
         words=criteria.words,
         sender=criteria.sender,
         participant=criteria.participant,
         start_date=criteria.start_date,
         end_date=criteria.end_date,
-        limit=SEARCH_LIMIT + 1,
     )
+    matches = await context.email_search.search(
+        filters, owner_id=context.owner_id,
+        limit=100 if criteria.thread_selection == "latest" else SEARCH_LIMIT + 1,
+    )
+    if criteria.thread_selection == "latest":
+        return await context.threads.thread_activity(matches, owner_id=context.owner_id)
+    return matches
 
 
 def _select_thread(matches: list[MailSnippet], latest: bool) -> AgentUpdate:
     by_thread: dict[str, MailSnippet] = {}
-    for match in sorted(matches, key=lambda mail: mail.date, reverse=True):
+    for match in sorted(
+        matches, key=lambda mail: mail.thread_last_date or mail.date, reverse=True,
+    ):
         by_thread.setdefault(match.thread_id, match)
     candidates = tuple(by_thread.values())
-    unambiguous_latest = latest and len(candidates) > 1 and candidates[0].date > candidates[1].date
+    unambiguous_latest = latest and len(candidates) > 1 and (
+        (candidates[0].thread_last_date or candidates[0].date)
+        > (candidates[1].thread_last_date or candidates[1].date)
+    )
     if len(candidates) == 1 or unambiguous_latest:
         return {"thread_id": UUID(candidates[0].thread_id), "next_step": "read_and_retrieve"}
     options = candidates[:SEARCH_LIMIT]

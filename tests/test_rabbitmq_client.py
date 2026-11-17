@@ -1,7 +1,6 @@
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID
 
 import pytest
 
@@ -71,7 +70,7 @@ async def test_publish_failure_is_not_retried(transport):
     client, _, _, exchange, _ = transport
     exchange.publish.side_effect = ConnectionError()
     with pytest.raises(ConnectionError):
-        await RAGProducer(client, "events").publish_thread_closed(UUID(int=1))
+        await RAGProducer(client, "events").publish_doc_ingest("doc", "Title", "doc.md")
     exchange.publish.assert_awaited_once()
 
 
@@ -85,7 +84,7 @@ async def test_close_waits_for_publication(transport):
 
     exchange.publish.side_effect = publish
     producer = RAGProducer(client, "events")
-    sending = asyncio.create_task(producer.publish_thread_closed(UUID(int=1)))
+    sending = asyncio.create_task(producer.publish_doc_ingest("doc", "Title", "doc.md"))
     await started.wait()
     closing = asyncio.create_task(client.close())
     await asyncio.sleep(0)

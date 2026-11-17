@@ -6,6 +6,10 @@ class ThreadNotFoundError(ServiceError):
     """Почтовый тред не найден."""
 
 
+class EmailNotFoundError(ServiceError):
+    """Письмо отсутствует или недоступно владельцу."""
+
+
 class DocumentNotFoundError(ServiceError):
     """Документ не найден."""
 
@@ -20,3 +24,15 @@ class LLMTimeoutError(ServiceError):
 
 class SecurityViolationError(ServiceError):
     """Блокировка сценария контуром безопасности."""
+
+
+class GmailAccountNotFound(ServiceError):
+    """Gmail-аккаунт отсутствует или недоступен владельцу."""
+
+
+class GmailConnectionConflict(ServiceError):
+    """Настройки подключения изменились или требуют уточнения."""
+
+
+class GmailLeaseLost(ServiceError):
+    """Проход синхронизации больше не владеет подключением."""

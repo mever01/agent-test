@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
@@ -8,25 +8,31 @@ from app.api.dependencies import (
     get_admin_service,
     get_auth_service,
     get_agent_service,
-    get_mail_service,
+    get_email_retrieval_service,
+    get_raw_email_service,
+    get_thread_service,
 )
 from app.agent.service import AgentService
-from app.db.schemas import MailMessage, MailSnippet, MailThreadDetails
+from app.db.dao.db_mail.raw_email import RawEmailDAO
+from app.dto.db_mail import MailMessage, MailSearchCriteria, MailSnippet
 from app.external_api_clients.llm_client import LLMClient
 from app.external_api_clients.schemas import LLMResponse
-from app.rag.retrieval.service import RAGRetrievalService
+from app.services.rag.retrieval.document.service import DocumentRetrievalService
 from app.api.agent.schemas import ChatResponse
 from app.main import app
 from app.db.models.user import User
 from app.services.exceptions import ThreadNotFoundError
-from app.services.mail_service import MailService
+from app.services.db_mail.thread import ThreadService
+from app.services.db_mail.draft import DraftService
+from app.services.db_mail.raw_email import RawEmailService
+from app.services.rag.retrieval.email.service import EmailRetrievalService
 
 
 @pytest.fixture
 def client():
     auth = MagicMock()
     auth.authenticate = AsyncMock(side_effect=lambda token: (
-        User(email="test@example.org", role=token) if token in {"admin", "manager"} else None
+        User(id=uuid.UUID(int=1), email="test@example.org", role=token) if token in {"admin", "manager"} else None
     ))
     app.dependency_overrides[get_auth_service] = lambda: auth
     try:
@@ -48,9 +54,34 @@ def test_rbac_forbidden_without_required_role(client):
     assert response.status_code == 403
 
 
+def test_get_email_passes_owner_and_returns_404_for_unavailable_message(
+    client: TestClient,
+) -> None:
+    email_id, thread_id = uuid.uuid4(), uuid.uuid4()
+    message = MailMessage(
+        id=str(email_id), thread_id=str(thread_id), sender="sender@example.test",
+        recipient="manager@example.test", date=datetime.now(timezone.utc),
+        subject="Поставка", body="Полный текст письма.",
+    )
+    dao = AsyncMock(spec=RawEmailDAO)
+    dao.get_email.side_effect = [message, None]
+    app.dependency_overrides[get_raw_email_service] = lambda: RawEmailService(dao)
+    endpoint = f"/api/v1/emails/{email_id}"
+
+    response = client.get(endpoint)
+    assert response.status_code == 200
+    assert response.json()["body"] == message.body
+    assert client.get(endpoint).status_code == 404
+    assert TestClient(app).get(endpoint).status_code == 401
+    assert dao.get_email.await_count == 2
+    for call in dao.get_email.await_args_list:
+        assert call.args == (email_id,)
+        assert call.kwargs == {"owner_id": uuid.UUID(int=1)}
+
+
 def test_search_emails_endpoint(client):
-    mock_mail_service = MagicMock()
-    mock_mail_service.search_emails = AsyncMock(
+    service = MagicMock()
+    service.search = AsyncMock(
         return_value=[
             MailSnippet(
                 email_id="e1",
@@ -63,7 +94,7 @@ def test_search_emails_endpoint(client):
         ]
     )
 
-    app.dependency_overrides[get_mail_service] = lambda: mock_mail_service
+    app.dependency_overrides[get_email_retrieval_service] = lambda: service
     try:
         response = client.get(
             "/api/v1/emails/search?words=поставка",
@@ -79,28 +110,28 @@ def test_search_emails_endpoint(client):
 
 def test_search_api_accepts_sender_without_words_and_rejects_empty_query(client):
     service = MagicMock()
-    service.search_emails = AsyncMock(return_value=[])
-    app.dependency_overrides[get_mail_service] = lambda: service
+    service.search = AsyncMock(return_value=[])
+    app.dependency_overrides[get_email_retrieval_service] = lambda: service
     try:
         endpoint = "/api/v1/emails/search"
         assert client.get(endpoint, params={"sender": "director@progress-corp.ru"}).status_code == 200
-        service.search_emails.assert_awaited_once_with(
-            words=None, sender="director@progress-corp.ru", participant=None,
-            start_date=None, end_date=None,
+        service.search.assert_awaited_once_with(
+            MailSearchCriteria(sender="director@progress-corp.ru"),
+            owner_id=uuid.UUID(int=1),
         )
         assert client.get(endpoint, params={"words": " "}).status_code == 422
-        assert service.search_emails.await_count == 1
+        assert service.search.await_count == 1
     finally:
         app.dependency_overrides.clear()
 
 
 def test_get_thread_not_found(client):
-    mock_mail_service = MagicMock()
-    mock_mail_service.get_thread = AsyncMock(
+    service = MagicMock()
+    service.get_thread = AsyncMock(
         side_effect=ThreadNotFoundError("Thread not found")
     )
 
-    app.dependency_overrides[get_mail_service] = lambda: mock_mail_service
+    app.dependency_overrides[get_thread_service] = lambda: service
     try:
         test_uuid = str(uuid.uuid4())
         response = client.get(
@@ -112,29 +143,8 @@ def test_get_thread_not_found(client):
         app.dependency_overrides.clear()
 
 
-def test_close_thread_endpoint(client):
-    test_uuid = uuid.uuid4()
-    mock_mail_service = MagicMock()
-    mock_mail_service.close_thread = AsyncMock(
-        return_value={
-            "status": "closed",
-            "thread_id": str(test_uuid),
-            "queued_for_rag": True,
-        }
-    )
-
-    app.dependency_overrides[get_mail_service] = lambda: mock_mail_service
-    try:
-        response = client.post(
-            f"/api/v1/emails/threads/{test_uuid}/close",
-            headers={"Authorization": "Bearer manager"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "closed"
-        assert data["queued_for_rag"] is True
-    finally:
-        app.dependency_overrides.clear()
+def test_thread_close_route_is_removed(client: TestClient) -> None:
+    assert client.post(f"/api/v1/emails/threads/{uuid.uuid4()}/close").status_code == 404
 
 
 def test_agent_chat_endpoint(client):
@@ -165,18 +175,21 @@ def test_agent_chat_endpoint(client):
 
 def test_agent_searches_mail_through_http(client):
     llm = MagicMock(spec=LLMClient)
-    mail = MagicMock(spec=MailService)
+    email_search = MagicMock(spec=EmailRetrievalService)
     llm.chat = AsyncMock(side_effect=[
         LLMResponse(content='{"task":"search"}'),
         LLMResponse(tool_calls=[{"name": "search_emails", "args": {
             "words": "98123", "sender": "ivan", "start_date": "2026-11-01",
         }}]),
     ])
-    mail.search_emails = AsyncMock(return_value=[MailSnippet(
+    email_search.search = AsyncMock(return_value=[MailSnippet(
         "email-id", "thread-id", "Проект X", "ivan@example.org",
         datetime(2026, 11, 1, tzinfo=timezone.utc), "Поставка оборудования",
     )])
-    agent = AgentService(llm, mail, MagicMock(spec=RAGRetrievalService))
+    agent = AgentService(
+        llm, email_search, MagicMock(spec=ThreadService), MagicMock(spec=DraftService),
+        MagicMock(spec=DocumentRetrievalService),
+    )
     app.dependency_overrides[get_agent_service] = lambda: agent
 
     response = client.post("/api/v1/agent/chat", json={
@@ -186,9 +199,10 @@ def test_agent_searches_mail_through_http(client):
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
     assert "email-id" in response.json()["response"]
-    criteria = mail.search_emails.await_args.kwargs
-    assert criteria["words"] == "98123" and criteria["sender"] == "ivan"
-    assert criteria["start_date"].isoformat() == "2026-11-01"
+    criteria = email_search.search.await_args.args[0]
+    assert email_search.search.await_args.kwargs["owner_id"] == uuid.UUID(int=1)
+    assert criteria.words == "98123" and criteria.sender == "ivan"
+    assert criteria.start_date.isoformat() == "2026-11-01"
 
 
 def test_admin_ingest_document_endpoint(client):
@@ -218,15 +232,6 @@ def test_admin_ingest_document_endpoint(client):
         assert data["status"] == "queued"
     finally:
         app.dependency_overrides.clear()
-
-
-def test_mail_dependency_builds_real_service():
-    from app.api.dependencies import get_mail_service
-
-    repo, producer = MagicMock(), MagicMock()
-    service = get_mail_service(mail_repo=repo, rag_producer=producer)
-    assert service._mail_repo is repo
-    assert service._rag_producer is producer
 
 
 def test_token_endpoint_and_server_role(client):

@@ -45,7 +45,9 @@ async def read_and_retrieve(
                 "next_step": "__end__"}
 
     try:
-        thread = await runtime.context.mail.get_thread(read_call.thread_id)
+        thread = await runtime.context.threads.get_thread(
+            read_call.thread_id, owner_id=runtime.context.owner_id,
+        )
         if not thread.messages:
             return {
                 "result": AgentResult(run_id, "В выбранной цепочке нет писем."),
@@ -55,7 +57,7 @@ async def read_and_retrieve(
             f"{mail.subject}\n{mail.body}" for mail in reversed(thread.messages)
         )
         rag_query = f"{state['request']}\n{thread_text[:12000]}"
-        rag = await runtime.context.rag.get_context(query=rag_query)
+        rag = await runtime.context.documents.get_context(query=rag_query)
     except ThreadNotFoundError:
         return {
             "result": AgentResult(run_id, "Выбранная цепочка больше недоступна.", status="failed"),
@@ -70,6 +72,6 @@ async def read_and_retrieve(
         }
     return {
         "thread": thread,
-        "rag_chunks": [*rag.documents, *rag.threads],
+        "rag_chunks": rag.documents,
         "next_step": "prepare_result",
     }

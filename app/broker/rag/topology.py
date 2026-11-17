@@ -17,7 +17,6 @@ class RAGExchanges:
 
 @dataclass(frozen=True)
 class RAGQueues:
-    threads: AbstractQueue
     documents: AbstractQueue
     dlq: AbstractQueue
 
@@ -58,23 +57,12 @@ class RAGTopology(RabbitTopology[RAGTopologyResources]):
             "x-dead-letter-routing-key": RoutingKey.DEAD_LETTER,
         }
 
-        threads = await self.declare_queue(
-            name=Queue.THREADS,
-            arguments=dlq_arguments,
-        )
-
         documents = await self.declare_queue(
             name=Queue.DOCUMENTS,
             arguments=dlq_arguments,
         )
 
         # Bindings
-        await self.bind(
-            queue=threads,
-            exchange=events,
-            routing_key=RoutingKey.THREAD_BINDING_PATTERN,
-        )
-
         await self.bind(
             queue=documents,
             exchange=events,
@@ -87,7 +75,6 @@ class RAGTopology(RabbitTopology[RAGTopologyResources]):
                 dlx=dlx,
             ),
             queues=RAGQueues(
-                threads=threads,
                 documents=documents,
                 dlq=dlq,
             ),

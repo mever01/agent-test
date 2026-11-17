@@ -1,6 +1,4 @@
-from datetime import datetime
-from app.rag.ingestion.text_cleaner import clean_email_body, format_cleaned_thread
-from app.db.schemas import MailMessage
+from app.services.rag.ingestion.email.text_cleaner import clean_email_body
 
 def test_clean_email_body_strips_quotes_and_signatures():
     raw_body = """Здравствуйте! Согласуем дату 25 ноября.
@@ -19,31 +17,3 @@ def test_clean_email_body_strips_quotes_and_signatures():
     assert "John wrote:" not in cleaned
     assert "Пришлите сроки" not in cleaned
     assert "Руководитель IT" not in cleaned
-
-def test_format_cleaned_thread():
-    messages = [
-        MailMessage(
-            id="msg_1",
-            thread_id="th_1",
-            sender="client@corp.ru",
-            recipient="manager@mycorp.ru",
-            date=datetime(2026, 11, 1, 10, 0),
-            subject="Вопрос по поставке",
-            body="Интересуют сроки отгрузки партии.",
-        ),
-        MailMessage(
-            id="msg_2",
-            thread_id="th_1",
-            sender="manager@mycorp.ru",
-            recipient="client@corp.ru",
-            date=datetime(2026, 11, 2, 11, 0),
-            subject="Re: Вопрос по поставке",
-            body="Срок отгрузки — 25 ноября.\n\n--\nС уважением, Менеджер",
-        ),
-    ]
-
-    formatted = format_cleaned_thread(messages)
-    assert "Интересуют сроки отгрузки" in formatted
-    assert "Срок отгрузки — 25 ноября." in formatted
-    assert "С уважением, Менеджер" not in formatted
-

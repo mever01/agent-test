@@ -11,9 +11,11 @@ from app.agent.state import AgentContext, AgentState, Step
 from app.external_api_clients.llm_client import LLMClient
 from app.guardrails.inbound.injection_detector import detect_prompt_injection
 from app.guardrails.inbound.pii_masker import mask_pii
-from app.rag.retrieval.service import RAGRetrievalService
+from app.services.rag.retrieval.document.service import DocumentRetrievalService
 from app.services.exceptions import SecurityViolationError
-from app.services.mail_service import MailService
+from app.services.db_mail.draft import DraftService
+from app.services.db_mail.thread import ThreadService
+from app.services.rag.retrieval.email.service import EmailRetrievalService
 
 
 class AgentInvocation(AgentState):
@@ -22,11 +24,18 @@ class AgentInvocation(AgentState):
 
 class AgentService:
     def __init__(
-        self, llm_client: LLMClient, mail_service: MailService, rag_service: RAGRetrievalService
+        self,
+        llm_client: LLMClient,
+        email_search: EmailRetrievalService,
+        thread_service: ThreadService,
+        draft_service: DraftService,
+        document_search: DocumentRetrievalService,
     ) -> None:
         self._llm = llm_client
-        self._mail = mail_service
-        self._rag = rag_service
+        self._email_search = email_search
+        self._threads = thread_service
+        self._drafts = draft_service
+        self._documents = document_search
         self._checkpointer = InMemorySaver()
         self._graph = build_graph(self._checkpointer)
         self._resuming: set[UUID] = set()
@@ -42,8 +51,11 @@ class AgentService:
         config: RunnableConfig = {"configurable": {"thread_id": run_id}}
         context = AgentContext(
             llm=self._llm,
-            mail=self._mail,
-            rag=self._rag,
+            email_search=self._email_search,
+            threads=self._threads,
+            drafts=self._drafts,
+            documents=self._documents,
+            owner_id=user_id,
             canary=f"CANARY_SEC_{uuid4().hex}",
         )
 

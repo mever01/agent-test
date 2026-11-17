@@ -1,21 +1,26 @@
 import asyncio
-import json
-import logging
-import uuid
-from pathlib import Path
 from contextlib import AsyncExitStack
 from datetime import datetime
+import json
+import logging
+from pathlib import Path
+import uuid
+
+from sqlalchemy.dialects.postgresql import insert
 
 from app.configs import settings
+from app.db.dao.db_mail.raw_email import RawEmailDAO
+from app.db.dao.db_mail.thread import ThreadDAO
+from app.db.dao.rag.document_chunk import DocumentChunkDAO
+from app.db.dao.user import UserRepository
+from app.db.enums import AccountSource
+from app.db.models import GmailAccount
 from app.db.session import init_db, AsyncSessionLocal, engine
-from app.db.repositories.mail_repository import MailRepository
-from app.db.repositories.rag_document_repository import RAGDocumentRepository
-from app.db.repositories.rag_thread_repository import RAGThreadRepository
+from app.dto.db_mail import EmailWrite, ThreadWrite
+from app.dto.rag import DocumentContent
 from app.external_api_clients.embedding_client import EmbeddingClient
-from app.external_api_clients.llm_client import LLMClient
-from app.db.repositories.user_repository import UserRepository
-from app.rag.ingestion import RAGIngestionService
 from app.services.auth_service import hash_password
+from app.services.rag.ingestion.document.service import DocumentIngestionService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("seed_data")
@@ -37,22 +42,20 @@ async def seed() -> None:
     logging.getLogger().setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
 
-    closed_threads: list[uuid.UUID] = []
     async with AsyncExitStack() as stack:
         stack.push_async_callback(engine.dispose)
+        users = UserRepository(AsyncSessionLocal)
         await seed_base_user(
-            UserRepository(AsyncSessionLocal),
+            users,
             settings.seed_user_email,
             settings.seed_user_password.get_secret_value(),
         )
-        mail_repo = MailRepository(AsyncSessionLocal)
+        threads = ThreadDAO(AsyncSessionLocal)
+        emails = RawEmailDAO(AsyncSessionLocal)
         embed_client = EmbeddingClient()
-        llm_client = LLMClient()
         stack.push_async_callback(embed_client.close)
-        stack.push_async_callback(llm_client.close)
-        ingestion_service = RAGIngestionService(
-            mail_repo, RAGDocumentRepository(AsyncSessionLocal),
-            RAGThreadRepository(AsyncSessionLocal), embed_client, llm_client,
+        ingestion_service = DocumentIngestionService(
+            DocumentChunkDAO(AsyncSessionLocal), embed_client,
         )
 
         base_dir = Path(__file__).resolve().parents[1]
@@ -63,28 +66,41 @@ async def seed() -> None:
         if seed_file.exists():
             logger.info("Загрузка учебных тредов и писем...")
             data = json.loads(await asyncio.to_thread(seed_file.read_text, encoding="utf-8"))
+            owner = await users.by_email(settings.seed_user_email.strip().lower())
+            if owner is None:
+                raise RuntimeError("Не найден владелец учебных писем.")
+            account_id = uuid.uuid5(owner.id, "seed-gmail")
+            async with AsyncSessionLocal.begin() as session:
+                await session.execute(
+                    insert(GmailAccount)
+                    .values(id=account_id, owner_id=owner.id, name="Учебная почта")
+                    .on_conflict_do_nothing(index_elements=[GmailAccount.id]),
+                )
 
             for th in data.get("threads", []):
-                thread_id = uuid.UUID(th["id"])
-                await mail_repo.upsert_thread(
+                thread_id = uuid.uuid5(account_id, th["id"])
+                await threads.upsert_thread(ThreadWrite(
                     thread_id=thread_id,
                     subject=th["subject"],
                     client_email=th["client_email"],
-                    status=th.get("status", "active"),
-                )
-                if th.get("status") == "closed":
-                    closed_threads.append(thread_id)
+                    account_source=AccountSource.GMAIL,
+                    account_id=account_id,
+                    external_thread_id=th["id"],
+                ))
 
             for em in data.get("emails", []):
-                await mail_repo.insert_email(
-                    email_id=uuid.UUID(em["id"]),
-                    thread_id=uuid.UUID(em["thread_id"]),
+                await emails.insert_email(EmailWrite(
+                    email_id=uuid.uuid5(account_id, em["id"]),
+                    thread_id=uuid.uuid5(account_id, em["thread_id"]),
                     sender=em["sender"],
                     recipient=em["recipient"],
                     date=datetime.fromisoformat(em["date"].replace("Z", "+00:00")),
                     subject=em["subject"],
                     body=em["body"],
-                )
+                    account_source=AccountSource.GMAIL,
+                    account_id=account_id,
+                    message_id=em["id"],
+                ))
             logger.info("Учебные письма и треды успешно добавлены.")
 
         # 2. Загрузка справочных документов компании
@@ -98,15 +114,11 @@ async def seed() -> None:
                 title = doc_file.stem.replace("_", " ").title()
                 content = await asyncio.to_thread(doc_file.read_text, encoding="utf-8")
                 logger.info("Индексация документа %s в RAG...", doc_id)
-                await ingestion_service.process_document(
-                    doc_id=doc_id, title=title, content=content,
-                )
-
-        for thread_id in closed_threads:
-            await ingestion_service.ingest_thread(thread_id)
+                await ingestion_service.process_document(DocumentContent(
+                    doc_id, title, content,
+                ))
 
         logger.info("Первоначальный сидинг данных завершен!")
 
 if __name__ == "__main__":
     asyncio.run(seed())
-

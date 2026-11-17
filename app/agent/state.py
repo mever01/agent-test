@@ -6,11 +6,13 @@ from typing_extensions import TypedDict
 
 from app.agent.schemas import AgentResult, Clarification
 from app.agent.tools import CreateDraftArgs
-from app.db.schemas import MailThreadDetails
+from app.dto.db_mail import MailThreadDetails
 from app.external_api_clients.llm_client import LLMClient
-from app.rag.retrieval.schemas import RagChunk
-from app.rag.retrieval.service import RAGRetrievalService
-from app.services.mail_service import MailService
+from app.dto.rag import RagChunk
+from app.services.rag.retrieval.document.service import DocumentRetrievalService
+from app.services.db_mail.draft import DraftService
+from app.services.db_mail.thread import ThreadService
+from app.services.rag.retrieval.email.service import EmailRetrievalService
 
 Step = Literal[
     "search", "read_and_retrieve",
@@ -41,6 +43,9 @@ class AgentContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     llm: LLMClient
-    mail: MailService
-    rag: RAGRetrievalService
+    email_search: EmailRetrievalService
+    threads: ThreadService
+    drafts: DraftService
+    documents: DocumentRetrievalService
+    owner_id: UUID | None
     canary: str = Field(repr=False)

@@ -7,7 +7,14 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"
 
 
-class ThreadStatus(str, enum.Enum):
-    """Статусы цепочки писем (активна / закрыта)."""
-    ACTIVE = "active"
-    CLOSED = "closed"
+class GmailConnectionStatus(enum.StrEnum):
+    PENDING = "pending"
+    SYNCING = "syncing"
+    CONNECTED = "connected"
+    SYNC_ERROR = "sync_error"
+    REAUTH_REQUIRED = "reauth_required"
+    DISCONNECTED = "disconnected"
+
+
+class AccountSource(enum.StrEnum):
+    GMAIL = "gmail"

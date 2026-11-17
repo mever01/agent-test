@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from app.db.schemas import MailSearchCriteria
+from app.dto.db_mail import MailSearchCriteria
 from app.external_api_clients.schemas import LLMResponse, ToolDefinition
 
 
