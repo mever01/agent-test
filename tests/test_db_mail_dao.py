@@ -21,7 +21,13 @@ from app.db.dao.db_mail.thread import ThreadDAO
 from app.db.dao.rag.email_chunk import EmailChunkDAO
 from app.db.enums import AccountSource, GmailConnectionStatus
 from app.db.models import GmailAccount, GmailConnection, Thread, User
-from app.dto.db_mail import DraftWrite, EmailWrite, MailSearchCriteria, ThreadWrite
+from app.dto.db_mail import (
+    DraftWrite,
+    EmailWrite,
+    MailFilters,
+    MailSearchCriteria,
+    ThreadWrite,
+)
 from app.dto.rag import IndexedChunk
 
 pytestmark = pytest.mark.skipif(
@@ -175,6 +181,60 @@ async def test_mail_access_read_search_and_draft_replay(
     assert await threads.get_thread(thread.thread_id, owner_id=ctx.owner_id) is None
     assert await drafts.save_draft(draft, owner_id=ctx.owner_id) is None
     assert not await emails.search_emails(criteria, owner_id=ctx.owner_id)
+
+
+async def test_mail_feed_paginates_ties_and_scopes_results(
+    mail_context: MailContext,
+) -> None:
+    ctx = mail_context
+    threads = ThreadDAO(ctx.sessions)
+    emails = RawEmailDAO(ctx.sessions)
+    thread = make_thread(ctx.account_id)
+    await threads.upsert_thread(thread)
+    template = make_email(thread)
+    records = [
+        replace(template, email_id=uuid4(), message_id=str(index))
+        for index in range(13)
+    ]
+    for record in records:
+        await emails.insert_email(record)
+    await emails.insert_email(replace(
+        template,
+        email_id=uuid4(),
+        message_id="earlier",
+        date=template.date - timedelta(days=1),
+    ))
+
+    filters = MailFilters(
+        words="delivery",
+        sender="client",
+        participant="manager@example.test",
+        start_date=template.date.date(),
+        end_date=template.date.date(),
+    )
+    first = await emails.list_page(
+        filters, owner_id=ctx.owner_id, account_id=ctx.account_id, cursor=None, limit=10,
+    )
+    assert first.next_cursor is not None
+    rest = await emails.list_page(
+        filters,
+        owner_id=ctx.owner_id,
+        account_id=ctx.account_id,
+        cursor=first.next_cursor,
+        limit=10,
+    )
+    assert rest.next_cursor is None
+    expected = sorted((record.email_id for record in records), reverse=True)
+    assert [item.email_id for item in first.items + rest.items] == list(map(str, expected))
+
+    hidden = await emails.list_page(
+        MailFilters(),
+        owner_id=ctx.other_owner_id,
+        account_id=ctx.account_id,
+        cursor=None,
+        limit=10,
+    )
+    assert not hidden.items
 
 
 async def test_mail_integrity_and_demo_access(mail_context: MailContext) -> None:

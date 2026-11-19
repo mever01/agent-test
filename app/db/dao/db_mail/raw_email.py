@@ -1,14 +1,37 @@
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import Date, String, cast, func, literal_column, or_, select
+from sqlalchemy import (
+    Date,
+    Row,
+    Select,
+    String,
+    cast,
+    func,
+    literal,
+    literal_column,
+    or_,
+    select,
+    tuple_,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.dao.query_helpers import accessible_account, lock_mail_account
 from app.db.models import RawEmail
-from app.dto.db_mail import EmailWrite, MailMessage, MailSearchCriteria, MailSnippet
+from app.dto.db_mail import (
+    EmailWrite,
+    MailCursor,
+    MailFilters,
+    MailMessage,
+    MailPage,
+    MailSearchCriteria,
+    MailSnippet,
+)
+
+type MailSnippetColumns = tuple[UUID, UUID, str, str, datetime, str]
 
 
 class RawEmailDAO:
@@ -40,98 +63,39 @@ class RawEmailDAO:
         limit: int = 10,
     ) -> list[MailSnippet]:
         """Ищет доступные письма по тексту, участникам и диапазону дат."""
-        conditions = [
-            accessible_account(RawEmail.account_id, RawEmail.account_source, owner_id),
-        ]
-        snippet = func.left(RawEmail.body, 240)
+        statement = _select_mail_snippets(criteria, owner_id, highlight=True)
+        async with self._session_factory() as session:
+            rows = await session.execute(statement.limit(limit))
+            return [_to_mail_snippet(row) for row in rows]
 
-        if criteria.words:
-            config = literal_column("'russian'::regconfig")
-            query = func.plainto_tsquery(config, criteria.words)
-            words = criteria.words.lower()
-
-            conditions.append(
-                or_(
-                    RawEmail.tsv.bool_op("@@")(query),
-                    func.strpos(func.lower(RawEmail.body), words) > 0,
-                    func.strpos(func.lower(RawEmail.subject), words) > 0,
-                    func.strpos(
-                        func.lower(cast(RawEmail.thread_id, String)),
-                        words,
-                    ) > 0,
-                    func.strpos(
-                        func.lower(cast(RawEmail.id, String)),
-                        words,
-                    ) > 0,
-                )
+    async def list_page(
+        self,
+        filters: MailFilters,
+        *,
+        owner_id: UUID,
+        account_id: UUID | None,
+        cursor: MailCursor | None,
+        limit: int,
+    ) -> MailPage:
+        statement = _select_mail_snippets(filters, owner_id, highlight=False)
+        if account_id is not None:
+            statement = statement.where(RawEmail.account_id == account_id)
+        if cursor is not None:
+            before = tuple_(cursor.date, cursor.email_id)
+            statement = statement.where(
+                tuple_(RawEmail.date, RawEmail.id) < before,
             )
-            snippet = func.ts_headline(
-                config,
-                RawEmail.body,
-                query,
-                "StartSel=<b>, StopSel=</b>, MaxWords=35, MinWords=15",
-            )
-
-        if criteria.sender:
-            sender = criteria.sender.lower()
-
-            if re.fullmatch(r"[^\s@]+@[^\s@]+", sender):
-                conditions.append(func.lower(RawEmail.sender) == sender)
-            else:
-                conditions.append(
-                    func.strpos(func.lower(RawEmail.sender), sender) > 0,
-                )
-
-        if criteria.participant:
-            participant = criteria.participant.lower()
-            conditions.append(
-                or_(
-                    func.lower(RawEmail.sender) == participant,
-                    func.lower(RawEmail.recipient) == participant,
-                )
-            )
-
-        if criteria.start_date is not None:
-            conditions.append(
-                RawEmail.date >= cast(criteria.start_date, Date),
-            )
-
-        if criteria.end_date is not None:
-            conditions.append(
-                RawEmail.date < cast(
-                    criteria.end_date + timedelta(days=1),
-                    Date,
-                ),
-            )
-
-        statement = (
-            select(
-                RawEmail.id,
-                RawEmail.thread_id,
-                RawEmail.subject,
-                RawEmail.sender,
-                RawEmail.date,
-                snippet.label("snippet"),
-            )
-            .where(*conditions)
-            .order_by(RawEmail.date.desc(), RawEmail.id.desc())
-            .limit(limit)
-        )
 
         async with self._session_factory() as session:
-            rows = await session.execute(statement)
+            result = await session.execute(statement.limit(limit + 1))
+            rows = result.all()
 
-            return [
-                MailSnippet(
-                    email_id=str(row.id),
-                    thread_id=str(row.thread_id),
-                    subject=row.subject,
-                    sender=row.sender,
-                    date=row.date,
-                    snippet=row.snippet or row.subject,
-                )
-                for row in rows
-            ]
+        items = [_to_mail_snippet(row) for row in rows[:limit]]
+        next_cursor = None
+        if len(rows) > limit:
+            last = items[-1]
+            next_cursor = MailCursor(date=last.date, email_id=UUID(last.email_id))
+        return MailPage(items=items, next_cursor=next_cursor)
 
     async def get_thread_emails(
         self,
@@ -192,4 +156,103 @@ def _to_mail_message(email: RawEmail) -> MailMessage:
         date=email.date,
         subject=email.subject,
         body=email.body,
+    )
+
+
+def _select_mail_snippets(
+    criteria: MailFilters,
+    owner_id: UUID | None,
+    *,
+    highlight: bool,
+) -> Select[MailSnippetColumns]:
+    conditions: list[ColumnElement[bool]] = [
+        accessible_account(
+            RawEmail.account_id.expression,
+            RawEmail.account_source.expression,
+            owner_id,
+        ),
+    ]
+    snippet = func.left(RawEmail.body, 240)
+
+    if criteria.words:
+        config = literal_column("'russian'::regconfig", type_=String())
+        query = func.plainto_tsquery(config, criteria.words)
+        words = criteria.words.lower()
+
+        conditions.append(
+            or_(
+                RawEmail.tsv.bool_op("@@")(query),
+                func.strpos(func.lower(RawEmail.body), words) > 0,
+                func.strpos(func.lower(RawEmail.subject), words) > 0,
+                func.strpos(
+                    func.lower(cast(RawEmail.thread_id, String)),
+                    words,
+                ) > 0,
+                func.strpos(
+                    func.lower(cast(RawEmail.id, String)),
+                    words,
+                ) > 0,
+            )
+        )
+        if highlight:
+            snippet = func.ts_headline(
+                config,
+                RawEmail.body,
+                query,
+                "StartSel=<b>, StopSel=</b>, MaxWords=35, MinWords=15",
+            )
+
+    if criteria.sender:
+        sender = criteria.sender.lower()
+
+        if re.fullmatch(r"[^\s@]+@[^\s@]+", sender):
+            conditions.append(func.lower(RawEmail.sender) == sender)
+        else:
+            conditions.append(
+                func.strpos(func.lower(RawEmail.sender), sender) > 0,
+            )
+
+    if criteria.participant:
+        participant = criteria.participant.lower()
+        conditions.append(
+            or_(
+                func.lower(RawEmail.sender) == participant,
+                func.lower(RawEmail.recipient) == participant,
+            )
+        )
+
+    if criteria.start_date is not None:
+        conditions.append(
+            RawEmail.date >= cast(criteria.start_date, Date),
+        )
+
+    if criteria.end_date is not None:
+        conditions.append(
+            RawEmail.date < cast(criteria.end_date, Date)
+            + literal(timedelta(days=1)),
+        )
+
+    return (
+        select(
+            RawEmail.id,
+            RawEmail.thread_id,
+            RawEmail.subject,
+            RawEmail.sender,
+            RawEmail.date,
+            snippet.label("snippet"),
+        )
+        .where(*conditions)
+        .order_by(RawEmail.date.desc(), RawEmail.id.desc())
+    )
+
+
+def _to_mail_snippet(row: Row[MailSnippetColumns]) -> MailSnippet:
+    email_id, thread_id, subject, sender, date, snippet = row
+    return MailSnippet(
+        email_id=str(email_id),
+        thread_id=str(thread_id),
+        subject=subject,
+        sender=sender,
+        date=date,
+        snippet=snippet or subject,
     )

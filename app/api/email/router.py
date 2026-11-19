@@ -1,8 +1,8 @@
 from datetime import date
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-
 from pydantic import ValidationError
 
 from app.api.dependencies import (
@@ -11,13 +11,39 @@ from app.api.dependencies import (
     get_raw_email_service,
     require_role,
 )
+from app.api.email.schemas import MailListQuery
 from app.db.models.user import User
-from app.dto.db_mail import MailMessage, MailSearchCriteria, MailSnippet
+from app.dto.db_mail import (
+    MailMessage,
+    MailPage,
+    MailSearchCriteria,
+    MailSnippet,
+)
 from app.services.db_mail.raw_email import RawEmailService
 from app.services.exceptions import EmailNotFoundError
 from app.services.rag.retrieval.email.service import EmailRetrievalService
 
 router = APIRouter(prefix="/emails", tags=["Emails & Threads"])
+
+
+@router.get(
+    "/",
+    response_model=MailPage,
+    dependencies=[Depends(require_role(["manager", "admin"]))],
+)
+async def list_emails_endpoint(
+    query: Annotated[MailListQuery, Query()],
+    service: RawEmailService = Depends(get_raw_email_service),
+    user: User = Depends(get_current_user),
+) -> MailPage:
+    """Возвращает страницу писем, доступных владельцу."""
+    return await service.list_page(
+        query,
+        owner_id=user.id,
+        account_id=query.account_id,
+        cursor=query.cursor(),
+        limit=query.limit,
+    )
 
 
 @router.get(

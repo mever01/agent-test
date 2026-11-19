@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Self
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -46,7 +47,7 @@ class DraftWrite:
     operation_id: UUID | None = None
 
 
-class MailSearchCriteria(BaseModel):
+class MailFilters(BaseModel):
     words: str | None = None
     sender: str | None = None
     participant: str | None = None
@@ -59,13 +60,19 @@ class MailSearchCriteria(BaseModel):
         return (value.strip() or None) if value is not None else None
 
     @model_validator(mode="after")
-    def validate_filters(self) -> "MailSearchCriteria":
+    def validate_period(self) -> Self:
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("Дата начала должна быть не позже даты окончания.")
+        return self
+
+
+class MailSearchCriteria(MailFilters):
+    @model_validator(mode="after")
+    def require_filter(self) -> Self:
         if not any((
             self.words, self.sender, self.participant, self.start_date, self.end_date,
         )):
             raise ValueError("Укажите слова, отправителя, участника или период.")
-        if self.start_date and self.end_date and self.start_date > self.end_date:
-            raise ValueError("Дата начала должна быть не позже даты окончания.")
         return self
 
 
@@ -89,6 +96,18 @@ class MailSnippet:
     date: datetime
     snippet: str
     thread_last_date: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MailCursor:
+    date: datetime
+    email_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class MailPage:
+    items: list[MailSnippet]
+    next_cursor: MailCursor | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
-from typing import Literal
+from datetime import date
+from typing import Literal, Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, StringConstraints
 
-from app.dto.db_mail import MailSnippet
+from app.dto.db_mail import MailSnippet, MailSearchCriteria
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,3 +51,48 @@ class Clarification:
     question: str
     kind: Literal["criteria", "candidate", "fact"]
     candidates: tuple[MailSnippet, ...] = ()
+
+
+class SearchEmailsArgs(MailSearchCriteria):
+    model_config = ConfigDict(extra="forbid")
+
+    words: str | None = Field(
+        default=None,
+        description="Тема, которую обсуждали в письмах, название проекта или артикул. "
+                    "Для «где обсуждали перенос сроков» укажи «перенос сроков».",
+    )
+    sender: str | None = Field(default=None, description="Адрес или имя отправителя письма.")
+    participant: str | None = Field(
+        default=None,
+        description="Адрес участника переписки в обе стороны.",
+    )
+    start_date: date | None = Field(default=None, description="Первый день периода включительно.")
+    end_date: date | None = Field(default=None, description="Последний день периода включительно.")
+    thread_selection: Literal["latest"] | None = Field(
+        default=None,
+        description="latest только по явной просьбе выбрать последнюю переписку из совпадений.",
+    )
+    @field_validator("words")
+    @classmethod
+    def discard_generic_terms(cls, value: str | None) -> str | None:
+        if value and value.strip().casefold() in {"письмо", "письма", "переписка", "переписку"}:
+            return None
+        return value
+
+
+class ReadThreadArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: UUID
+
+
+class CreateDraftArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: UUID
+    recipient: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+    ]
+    subject: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]

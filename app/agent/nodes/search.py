@@ -88,14 +88,18 @@ async def _search_mail(
         limit=100 if criteria.thread_selection == "latest" else SEARCH_LIMIT + 1,
     )
     if criteria.thread_selection == "latest":
-        return await context.threads.thread_activity(matches, owner_id=context.owner_id)
+        return await context.threads.thread_activity(
+            matches, owner_id=context.owner_id
+        )
     return matches
 
 
 def _select_thread(matches: list[MailSnippet], latest: bool) -> AgentUpdate:
     by_thread: dict[str, MailSnippet] = {}
     for match in sorted(
-        matches, key=lambda mail: mail.thread_last_date or mail.date, reverse=True,
+        matches,
+        key=lambda mail: mail.thread_last_date or mail.date,
+        reverse=True,
     ):
         by_thread.setdefault(match.thread_id, match)
     candidates = tuple(by_thread.values())

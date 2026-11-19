@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +14,13 @@ from app.api.dependencies import (
 )
 from app.agent.service import AgentService
 from app.db.dao.db_mail.raw_email import RawEmailDAO
-from app.dto.db_mail import MailMessage, MailSearchCriteria, MailSnippet
+from app.dto.db_mail import (
+    MailCursor,
+    MailMessage,
+    MailPage,
+    MailSearchCriteria,
+    MailSnippet,
+)
 from app.external_api_clients.llm_client import LLMClient
 from app.external_api_clients.schemas import LLMResponse
 from app.services.rag.retrieval.document.service import DocumentRetrievalService
@@ -77,6 +83,47 @@ def test_get_email_passes_owner_and_returns_404_for_unavailable_message(
     for call in dao.get_email.await_args_list:
         assert call.args == (email_id,)
         assert call.kwargs == {"owner_id": uuid.UUID(int=1)}
+
+
+def test_mail_feed_validates_and_passes_filters(client: TestClient) -> None:
+    account_id, email_id = uuid.uuid4(), uuid.uuid4()
+    before_date = datetime.now(timezone.utc)
+    dao = AsyncMock(spec=RawEmailDAO)
+    dao.list_page.return_value = MailPage(items=[])
+    app.dependency_overrides[get_raw_email_service] = lambda: RawEmailService(dao)
+    endpoint = "/api/v1/emails/"
+
+    assert TestClient(app).get(endpoint).status_code == 401
+    for params in (
+        {"limit": 101},
+        {"before_id": str(email_id)},
+        {"before_id": str(email_id), "before_date": "2026-11-18T12:00:00"},
+        {"start_date": "2026-11-20", "end_date": "2026-11-19"},
+    ):
+        assert client.get(endpoint, params=params).status_code == 422
+    dao.list_page.assert_not_awaited()
+
+    result = client.get(endpoint)
+    assert result.json() == {"items": [], "next_cursor": None}
+    assert dao.list_page.await_args.kwargs["limit"] == 25
+
+    result = client.get(endpoint, params={
+        "account_id": str(account_id),
+        "before_id": str(email_id),
+        "before_date": before_date.isoformat(),
+        "words": "поставка",
+        "sender": "client",
+        "limit": 15,
+    })
+    assert result.status_code == 200
+    filters = dao.list_page.await_args.args[0]
+    assert filters.words == "поставка" and filters.sender == "client"
+    assert dao.list_page.await_args.kwargs == {
+        "owner_id": uuid.UUID(int=1),
+        "account_id": account_id,
+        "cursor": MailCursor(date=before_date, email_id=email_id),
+        "limit": 15,
+    }
 
 
 def test_search_emails_endpoint(client):

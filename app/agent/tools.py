@@ -1,56 +1,6 @@
-from datetime import date
-from typing import Annotated, Literal
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
-
-from app.dto.db_mail import MailSearchCriteria
+from pydantic import BaseModel
+from app.agent.schemas import SearchEmailsArgs, ReadThreadArgs, CreateDraftArgs
 from app.external_api_clients.schemas import LLMResponse, ToolDefinition
-
-
-class SearchEmailsArgs(MailSearchCriteria):
-    model_config = ConfigDict(extra="forbid")
-
-    words: str | None = Field(
-        default=None,
-        description="Тема, которую обсуждали в письмах, название проекта или артикул. "
-                    "Для «где обсуждали перенос сроков» укажи «перенос сроков».",
-    )
-    sender: str | None = Field(default=None, description="Адрес или имя отправителя письма.")
-    participant: str | None = Field(
-        default=None,
-        description="Адрес участника переписки в обе стороны.",
-    )
-    start_date: date | None = Field(default=None, description="Первый день периода включительно.")
-    end_date: date | None = Field(default=None, description="Последний день периода включительно.")
-    thread_selection: Literal["latest"] | None = Field(
-        default=None,
-        description="latest только по явной просьбе выбрать последнюю переписку из совпадений.",
-    )
-    @field_validator("words")
-    @classmethod
-    def discard_generic_terms(cls, value: str | None) -> str | None:
-        if value and value.strip().casefold() in {"письмо", "письма", "переписка", "переписку"}:
-            return None
-        return value
-
-
-class ReadThreadArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    thread_id: UUID
-
-
-class CreateDraftArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    thread_id: UUID
-    recipient: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
-    ]
-    subject: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 def _tool(name: str, description: str, schema: type[BaseModel]) -> ToolDefinition:
@@ -62,7 +12,6 @@ def _tool(name: str, description: str, schema: type[BaseModel]) -> ToolDefinitio
             "parameters": schema.model_json_schema(),
         },
     }
-
 
 SEARCH_EMAILS = _tool(
     "search_emails",
